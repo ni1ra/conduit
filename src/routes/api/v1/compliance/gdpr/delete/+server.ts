@@ -3,7 +3,7 @@ import type { RequestHandler } from './$types';
 import { validateSession, auditLog } from '$lib/server/auth';
 import sql from '$lib/server/db';
 
-export const DELETE: RequestHandler = async ({ request, cookies }) => {
+export const POST: RequestHandler = async ({ request, cookies }) => {
 	const session = await validateSession(cookies);
 	if (!session) return json({ error: 'Unauthorized' }, { status: 401 });
 
