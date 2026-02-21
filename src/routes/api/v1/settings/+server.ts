@@ -9,7 +9,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 
 	const [tenant] = await sql`
 		SELECT id, name AS tenant_name, slug, plan, created_at
-		FROM conduit_tenants WHERE id = ${session.tenant_id}
+		FROM conduit_tenants WHERE id = ${session.tenantId}
 	`;
 
 	if (!tenant) return json({ error: 'Tenant not found' }, { status: 404 });
