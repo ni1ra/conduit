@@ -24,7 +24,7 @@ export const GET: RequestHandler = async ({ cookies }) => {
 	`;
 
 	const users = await sql`
-		SELECT u.id, u.email, u.name, u.role, u.last_login,
+		SELECT u.id, u.email, u.name, u.role, u.last_login_at AS last_login,
 			t.name AS tenant_name
 		FROM conduit_users u
 		JOIN conduit_tenants t ON t.id = u.tenant_id
