@@ -8,38 +8,52 @@ export const POST: RequestHandler = async ({ request }) => {
 	const source = await authenticateWriteKey(writeKey || null);
 	if (!source) return json({ error: 'Invalid write key' }, { status: 401 });
 
-	const body = await request.json();
-	const userId = body.userId || body.user_id;
-	if (!userId) return json({ error: 'userId required' }, { status: 400 });
+	try {
+		const body = await request.json();
+		const userId = body.userId || body.user_id;
+		if (!userId) return json({ error: 'userId required' }, { status: 400 });
 
-	const traits = body.traits || {};
-	const anonymousId = body.anonymousId || body.anonymous_id || null;
-	const context = body.context || {};
+		const traits = body.traits || {};
+		const anonymousId = body.anonymousId || body.anonymous_id || null;
+		const context = body.context || {};
 
-	const [event] = await sql`
-		INSERT INTO conduit_events (tenant_id, source_id, type, event_name, anonymous_id, user_id, properties, context)
-		VALUES (${source.tenantId}, ${source.sourceId}, 'identify', NULL, ${anonymousId}, ${userId},
-			${JSON.stringify(traits)}::jsonb, ${JSON.stringify(context)}::jsonb)
-		RETURNING id
-	`;
+		const [event] = await sql`
+			INSERT INTO conduit_events (tenant_id, source_id, type, event_name, anonymous_id, user_id, properties, context)
+			VALUES (${source.tenantId}, ${source.sourceId}, 'identify', NULL, ${anonymousId}, ${userId},
+				${JSON.stringify(traits)}::jsonb, ${JSON.stringify(context)}::jsonb)
+			RETURNING id
+		`;
 
-	await sql`
-		INSERT INTO conduit_profiles (tenant_id, user_id, anonymous_ids, traits, event_count, last_seen)
-		VALUES (${source.tenantId}, ${userId},
-			${anonymousId ? sql.array([anonymousId]) : sql.array([], 'text')},
-			${JSON.stringify(traits)}::jsonb, 1, NOW())
-		ON CONFLICT (tenant_id, user_id) DO UPDATE SET
-			anonymous_ids = CASE
-				WHEN ${anonymousId}::text IS NOT NULL AND NOT (conduit_profiles.anonymous_ids @> ARRAY[${anonymousId || ''}]::text[])
-				THEN array_append(conduit_profiles.anonymous_ids, ${anonymousId || ''})
-				ELSE conduit_profiles.anonymous_ids
-			END,
-			traits = conduit_profiles.traits || ${JSON.stringify(traits)}::jsonb,
-			event_count = conduit_profiles.event_count + 1,
-			last_seen = NOW()
-	`;
+		if (anonymousId) {
+			await sql`
+				INSERT INTO conduit_profiles (tenant_id, user_id, anonymous_ids, traits, event_count, last_seen)
+				VALUES (${source.tenantId}, ${userId}, ${sql.array([anonymousId])}, ${JSON.stringify(traits)}::jsonb, 1, NOW())
+				ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+					anonymous_ids = CASE
+						WHEN NOT (conduit_profiles.anonymous_ids @> ARRAY[${anonymousId}]::text[])
+						THEN array_append(conduit_profiles.anonymous_ids, ${anonymousId})
+						ELSE conduit_profiles.anonymous_ids
+					END,
+					traits = conduit_profiles.traits || ${JSON.stringify(traits)}::jsonb,
+					event_count = conduit_profiles.event_count + 1,
+					last_seen = NOW()
+			`;
+		} else {
+			await sql`
+				INSERT INTO conduit_profiles (tenant_id, user_id, anonymous_ids, traits, event_count, last_seen)
+				VALUES (${source.tenantId}, ${userId}, ARRAY[]::text[], ${JSON.stringify(traits)}::jsonb, 1, NOW())
+				ON CONFLICT (tenant_id, user_id) DO UPDATE SET
+					traits = conduit_profiles.traits || ${JSON.stringify(traits)}::jsonb,
+					event_count = conduit_profiles.event_count + 1,
+					last_seen = NOW()
+			`;
+		}
 
-	return json({ accepted: true, event_id: event.id }, {
-		headers: { 'Access-Control-Allow-Origin': '*' }
-	});
+		return json({ accepted: true, event_id: event.id }, {
+			headers: { 'Access-Control-Allow-Origin': '*' }
+		});
+	} catch (err) {
+		console.error('[CONDUIT] Identify error:', err);
+		return json({ error: 'Failed to identify user', detail: String(err) }, { status: 500 });
+	}
 };
